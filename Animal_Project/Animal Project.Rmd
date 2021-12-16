@@ -1,0 +1,209 @@
+---
+title: "Animal Project"
+author: "spradeko"
+date: "12/14/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(shiny)
+library(rgdal)
+library(leaflet)
+library(htmlwidgets)
+library(tigris)
+
+
+
+US_Pop <- read_xlsx(here::here("STA 518/Final-Project-518/Animal_Project/US Population (3).xlsx"))
+US_Pop <- pivot_longer(US_Pop, cols = 2:4, names_to ="Year", 
+ values_to = "Population")
+US_Pop$Year <- as.integer(US_Pop$Year)
+
+Animal_Data <- read_xlsx(here::here("STA 518/Final-Project-518/Animal_Project/Animal Data.xlsx"))
+Animal_Data$year <- as.integer(Animal_Data$year)
+
+
+
+world_spdf <- readOGR( 
+  dsn= here::here("DATA"), 
+  layer="TM_WORLD_BORDERS_SIMPL-0.3",
+  verbose=FALSE
+)
+
+world_spdf@data$POP2005[ which(world_spdf@data$POP2005 == 0)] = NA
+world_spdf@data$POP2005 <- as.numeric(as.character(world_spdf@data$POP2005)) / 1000000 %>% round(2)
+
+states <- states(cb=T)
+
+```
+
+
+
+```{r, adoption_canine}
+
+   # Preparing data for Interactive Map
+state_canine <- geo_join(states, Animal_Data, "STUSPS", "state", how = "inner")
+state_canine2 <- geo_join(state_canine, US_Pop, "NAME", "State", how = "inner")
+
+state_canine2$per_capita <- round(state_canine2$adoption_canine/state_canine2$Population*1000000,2)
+
+
+Canine2016 <-  filter(state_canine2, year == 2016)
+
+
+pal <- colorNumeric("YlOrBr", domain=Canine2016$per_capita)
+
+popup_canine <- paste0("<strong>", state_canine$NAME, 
+                   "</strong><br />Total Adoptions: ", Canine2016$adoption_canine,
+                   "<br />Per capita: ", 
+                   as.character(Canine2016$per_capita))
+```
+
+```{r, adoption_feline}
+
+ # Preparing data for Interactive Map
+
+state_feline <- geo_join(states, Animal_Data, "STUSPS", "state", how = "inner")
+state_feline2 <- geo_join(state_canine, US_Pop, "NAME", "State", how = "inner")
+
+state_feline2$per_capita <- round(state_feline2$adoption_feline/state_feline2$Population*1000000,2)
+
+
+Feline2016 <-  filter(state_feline2, year == 2016)
+
+
+state_feline2$per_capita <- round(state_feline2$adoption_canine/state_feline2$Population*1000000,2)
+
+pal2 <- colorNumeric("YlOrBr", domain=Feline2016$per_capita)
+
+popup_feline <- paste0("<strong>", Feline2016$NAME, 
+                   "</strong><br />Total Adoptions: ", Feline2016$adoption_feline,
+                   "<br />Per capita: ", 
+                   as.character(Feline2016$per_capita))
+
+
+```
+
+```{r}
+ui <- fluidPage(
+  
+  sidebarLayout(
+    
+    sidebarPanel(
+      selectInput(
+        inputId = "x",
+        label = "X-Axis:",
+        choices = c("Feline Adoption" = "adoption_feline",
+                    "Year" = "year",
+                    
+                    "State" = "NAME",
+                    "Died in Care Feline" = "died_in_care_feline",
+                    "Feline Shelter Euthanasia" = "shelter_euthanasia_feline",
+                    "Died in Care Canine" = "died_in_care_canine",
+                    "Canine Adoption" = "adoption_canine" ,
+                    "Canine Shelter Euthanasia" = "shelter_euthanasia_canine")),
+      
+      selectInput(
+        inputId = "y",
+        label = "Y-Axis:",
+        choices = c( "State" = "NAME",
+                     "Feline Adoption" = "adoption_feline",
+                     
+                    "Year" = "year",
+                    "Died in Care Feline" = "died_in_care_feline",
+                    "Feline Shelter Euthanasia" = "shelter_euthanasia_feline",
+                    "Died in Care Canine" = "died_in_care_canine",
+                    "Canine Adoption" = "adoption_canine" ,
+                    "Canine Shelter Euthanasia" = "shelter_euthanasia_canine")
+      ), 
+      
+      
+    fluid = TRUE, width = 4),
+    mainPanel(
+      tabsetPanel(type = "tabs",
+                  tabPanel("Canine Adoptions", leafletOutput("caninemap")),
+                  tabPanel("Feline Adoptions", leafletOutput("felinemap")),
+                  tabPanel("Scatterplot", plotOutput("scatterplot"))
+                
+                  ), width = 12
+    ) 
+  ))
+      
+server <- function(input, output, session) {
+  
+  # Interactive Canine Adoptions Map
+  
+  
+  output$caninemap <- renderLeaflet({
+   leaflet(options = leafletOptions(dragging = TRUE, minZoom = 4, maxZoom = 5)) %>%
+  addProviderTiles(provider = "CartoDB.PositronNoLabels") %>% 
+  setView(lng = -94.45165, lat = 39.59506, zoom = 4) %>% 
+    setMaxBounds(lng1 = -94.45165 + 30, 
+               lat1 =  39.59506 + 10, 
+               lng2 = -94.45165 - 35, 
+               lat2 =  39.59506 - 15) %>% 
+      addLegend(pal = pal, 
+            values = Canine2016$per_capita, 
+            position = "bottomright", 
+            title = "Canine Adoptions<br />per 100,000<br/>residents") %>% 
+   addPolygons(data = state_canine, 
+              fillColor = ~pal(Canine2016$per_capita),
+              fillOpacity = 0.7, 
+              weight = 0.2, 
+              smoothFactor = 0.2, 
+              popup = ~popup_canine) 
+ 
+})
+
+  # Interactive Feline Adoptions Map
+  
+
+  output$felinemap <- renderLeaflet({
+   leaflet(options = leafletOptions(dragging = TRUE, minZoom = 4, maxZoom = 5)) %>%
+  addProviderTiles(provider = "CartoDB.PositronNoLabels") %>% 
+  setView(lng = -94.45165, lat = 39.59506, zoom = 4) %>% 
+    setMaxBounds(lng1 = -94.45165 + 30, 
+               lat1 =  39.59506 + 10, 
+               lng2 = -94.45165 - 35, 
+               lat2 =  39.59506 - 15) %>% 
+      addLegend(pal = pal2, 
+            values = Feline2016$per_capita, 
+            position = "bottomright", 
+            title = "Canine Adoptions<br />per 100,000<br/>residents") %>% 
+   addPolygons(data = state_canine, 
+              fillColor = ~pal2(Feline2016$per_capita),
+              fillOpacity = 0.7, 
+              weight = 0.2, 
+              smoothFactor = 0.2, 
+              popup = ~popup_feline) 
+ 
+})
+  
+  # Scatterplot
+  
+  output$scatterplot <- renderPlot({
+    ggplot(data = state_canine2, aes_string(x = input$x,
+                                       y = input$y,
+                                       color = input$z)) +
+      geom_point()
+  })
+}
+shinyApp(ui = ui, server = server)
+
+```
+
+
+
+```{r, shiny}
+
+ui <- fluidPage(
+  selectInput("dataset", label = "Dataset", choices = ls("package:datasets")),
+  verbatimTextOutput("summary"),
+  tableOutput("table")
+)
+server <- function(input, output, session) {
+}
+shinyApp(ui, server)
+
+```
